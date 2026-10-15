@@ -1,0 +1,11 @@
+# Patent Classifier – pinned runtime dependencies (RISK-INFRA-3)
+# Regenerate with: pip-compile requirements.in
+# Last updated: 2026-10-14
+
+streamlit==1.45.1
+boto3==1.38.36
+
+# Server-side PDF magic-byte validation (RISK-APP-3).
+# Requires libmagic to be installed in the container image:
+#   apt-get install -y libmagic1
+python-magic==0.4.27

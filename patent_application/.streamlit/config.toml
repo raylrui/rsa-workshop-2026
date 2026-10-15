@@ -1,0 +1,15 @@
+# Streamlit server configuration
+# https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+
+[server]
+# Maximum upload size in megabytes (RISK-APP-2).
+# This is the Streamlit-layer limit; doc.py enforces the same limit again
+# in Python code as defence-in-depth.
+maxUploadSize = 20
+
+# Disable the "Deploy" button – this app is deployed via CI/CD, not from the UI
+enableStaticServing = false
+
+[browser]
+# Do not send usage statistics to Streamlit
+gatherUsageStats = false

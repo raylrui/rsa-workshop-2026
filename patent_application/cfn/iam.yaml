@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Patent Classifier – IAM roles (hardened).
+  Creates the ECS Task Execution Role and the ECS Task Role with
+  least-privilege access to Amazon Bedrock inference, SSM Parameter Store
+  (system prompt), and Bedrock invocation logging.
+
+Resources:
+
+  # ── ECS Task Execution Role ───────────────────────────────────────────────────
+  # Assumed by the ECS agent (not the application) to:
+  #   - Pull the container image from ECR
+  #   - Write container logs to CloudWatch Logs
+  # Does NOT have any Bedrock permissions.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: patent-classifier-execution-role
+      Description: ECS task execution role for Patent Classifier (ECR + CloudWatch only)
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Application
+          Value: patent-classifier
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ── ECS Task Role ─────────────────────────────────────────────────────────────
+  # Injected into the running application container via the task metadata endpoint.
+  # Scoped to exactly the Bedrock actions the app needs — nothing else.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: patent-classifier-task-role
+      Description: ECS task role for Patent Classifier (Bedrock inference only)
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockInferencePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # ── Bedrock inference ────────────────────────────────────────────
+              # Statement 1 – invoke the geographic cross-region inference profile.
+              # Conditioned to us-east-1 as the originating region (RISK-AUTH-2).
+              - Sid: AllowGeoCrisInferenceProfileAccess
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub arn:aws:bedrock:us-east-1:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: us-east-1
+
+              # Statement 2 – foundation model in all destination regions of the
+              # us.* profile from us-east-1 (us-east-1, us-east-2, us-west-2).
+              # Empty account field ("::") is required for foundation-model ARNs.
+              # Condition locks these permissions to the specific inference profile.
+              - Sid: AllowGeoCrisFoundationModelAccess
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                  - arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                  - arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0
+                Condition:
+                  StringEquals:
+                    bedrock:InferenceProfileArn: !Sub arn:aws:bedrock:us-east-1:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0
+
+              # ── SSM Parameter Store – system prompt (RISK-APP-4) ─────────────
+              # Read access to the system prompt parameter only.
+              # Narrowed to the exact parameter path; WithDecryption covers
+              # SecureString parameters.
+              - Sid: AllowSsmReadSystemPrompt
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:aws:ssm:us-east-1:${AWS::AccountId}:parameter/patent-classifier/system-prompt
+
+              # ── Bedrock invocation logging (RISK-HIPAA-3) ────────────────────
+              # Allows the application's Bedrock calls to be captured in the
+              # invocation log group created by the app stack.
+              - Sid: AllowBedrockInvocationLogging
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/aws/bedrock/patent-classifier:*
+      Tags:
+        - Key: Application
+          Value: patent-classifier
+        - Key: ManagedBy
+          Value: CloudFormation
+
+Outputs:
+  ExecutionRoleArn:
+    Description: ARN of the ECS Task Execution Role
+    Value: !GetAtt ExecutionRole.Arn
+    Export:
+      Name: patent-classifier-ExecutionRoleArn
+
+  ExecutionRoleName:
+    Description: Name of the ECS Task Execution Role
+    Value: !Ref ExecutionRole
+    Export:
+      Name: patent-classifier-ExecutionRoleName
+
+  TaskRoleArn:
+    Description: ARN of the ECS Task Role (application permissions)
+    Value: !GetAtt TaskRole.Arn
+    Export:
+      Name: patent-classifier-TaskRoleArn
+
+  TaskRoleName:
+    Description: Name of the ECS Task Role (application permissions)
+    Value: !Ref TaskRole
+    Export:
+      Name: patent-classifier-TaskRoleName
